@@ -1,0 +1,203 @@
+import re
+import tempfile
+import subprocess
+import shutil
+import os
+import os.path
+import conary.conarycfg
+import conary.build.lookaside
+import time
+RE_CLASS = re.compile(
+    r'''^class\s+(\S+)\(''')
+
+class SRPMPackageRecipe(PackageRecipe):
+    buildRequiresMap = {}
+    rpmPackages = []
+    rpmPackagesMap = {}
+    rpmName = ''
+    rpmUpVer = ''
+    rpmDist = ''
+    buildRequires = [ 'rpm', 'rpm-build', 'conary-policy-condora',
+        # minumum build environment Fedora:
+        'bash:runtime', 'bzip2:runtime', 'coreutils:runtime', 'cpio:runtime',
+        'diffutils:runtime', 'findutils:runtime', 'gawk:runtime',
+        'gcc:runtime', 'gcc:devel', 'gcc-c++:runtime', 'grep:runtime',
+        'gzip:runtime', 'info:runtime', 'make:runtime', 'patch:runtime',
+        'sed:runtime', 'shadow-utils:runtime', 'tar:runtime', 'unzip:runtime',
+        'util-linux:runtime', 'which:runtime', 'xz:runtime',
+        'glibc-devel:runtime', 'glibc-devel:devel', 'glibc-headers:runtime',
+        'glibc-headers:devel', 'file:runtime', 'doxygen:runtime',
+        'libstdc++-devel:runtime', 'libstdc++-devel:devel',
+        'kernel-headers:runtime', 'kernel-headers:devel','pkgconfig:runtime',
+        'pkgconfig:devel', 'autoconf:runtime' ]
+
+    @classmethod
+    def geturlinfo(cls):
+        if not cls.rpmName: cls.rpmName = cls.name
+        if not cls.rpmUpVer: cls.rpmUpVer = cls.version
+        if not cls.rpmDist: cls.rpmDist = ''
+        macros = {
+            'rpmName': cls.rpmName,
+            'rpmUpVer': cls.rpmUpVer,
+            'rpmDist': cls.rpmDist,
+            'rpmRelease': cls.rpmRelease,
+        }
+        return 'http://kojipkgs.fedoraproject.org/packages/%(rpmName)s/%(rpmUpVer)s/%(rpmRelease)s/src' % macros, '%(rpmName)s-%(rpmUpVer)s-%(rpmRelease)s.src.rpm' % macros
+    def RunForRPM(r, *args, **kwargs):
+        dir = None
+        if 'dir' in kwargs: dir = kwargs['dir']
+        r.Run('[ ! -f '+'%(builddir)s/../RPMS/'+kwargs['package']+'.rpm'+' ] || '+args[0], package=kwargs['package'], dir=dir)
+    def __init__(self, *args, **kwargs):
+        PackageRecipe.__init__(self, *args, **kwargs)
+        self.macros.rpmName = self.rpmName
+        self.macros.rpmUpVer = self.rpmUpVer
+        self.macros.rpmDist = self.rpmDist
+        self.macros.rpmRelease = self.rpmRelease
+    def postunpack(r): pass
+    def postmake(r): pass
+    def postmakeinstall(r): pass
+    def postpolicy(r): pass
+    def setup(r):
+        rpmurl, rpmfilename = r.geturlinfo()
+        r.addAction('echo %%_unpackaged_files_terminate_build 0 > ~/.rpmmacros')
+        r.addAction('echo %%_builddir %(builddir)s >> ~/.rpmmacros')
+        r.addAction('echo %%_specdir %(builddir)s/SPECS >> ~/.rpmmacros')
+        r.addAction('echo %%_rpmdir %(builddir)s/RPMS >> ~/.rpmmacros')
+        r.addAction('ln -s ../SPECS')
+        r.addAction('echo %%_sourcedir %(builddir)s/SOURCES >> ~/.rpmmacros')
+        r.addAction('echo %%dist %(rpmDist)s >> ~/.rpmmacros')
+        r.addAction('ln -s ../SOURCES')
+        r.addSource("/".join([rpmurl, rpmfilename]))
+        userhomedir = os.path.expanduser('~')
+        homedir = os.path.dirname(userhomedir)
+        r.addAction('mkdir -p %(builddir)s/rpmdb/'+homedir)
+        r.addAction('ln -s '+userhomedir+' %(builddir)s/rpmdb/'+homedir)
+        r.addAction('/bin/rpm --initdb --root %(builddir)s/rpmdb')
+        r.addAction('ln -s ../rpmdb')
+        r.addAction('rpm --root %(builddir)s/rpmdb -i '+rpmfilename)
+        r.addAction('mknod %(builddir)s/rpmbuild-pipe p')
+        r.addAction('sed -ie "s@^[	 ]*\\(%%prep\\)@\\1\\nexec \\&> %(builddir)s/rpmbuild-pipe@" %(builddir)s/SPECS/%(rpmName)s.spec')
+        r.addAction('sed -ie "s@^[	 ]*\\(%%build\\)@\\1\\nexec \\&> %(builddir)s/rpmbuild-pipe@" %(builddir)s/SPECS/%(rpmName)s.spec')
+        r.addAction('sed -ie "s@^[	 ]*\\(%%install\\)@\\1\\nexec \\&> %(builddir)s/rpmbuild-pipe@" %(builddir)s/SPECS/%(rpmName)s.spec')
+        r.addAction('rpmbuild --nodeps --root %(builddir)s/rpmdb -ba %(builddir)s/SPECS/%(rpmName)s.spec & echo $! > %(builddir)s/rpmbuild.pid')
+        r.addAction('cat %(builddir)s/rpmbuild-pipe')
+        r.postunpack()
+        r.Run('cat %(builddir)s/../rpmbuild-pipe')
+        r.postmake()
+        r.Run('cat %(builddir)s/../rpmbuild-pipe')
+        r.Run('while kill -0 $(< %(builddir)s/../rpmbuild.pid) ; do sleep .1 ; done')
+        r.Run("rpm -qp %(builddir)s/../RPMS/*/*.rpm --queryformat '%(builddir)s/../RPMS/%%{ARCH}/%%{NAME}-%%{VERSION}-%%{RELEASE}.%%{ARCH}.rpm %(builddir)s/../RPMS/%%{NAME}.rpm\n'|while read OLD NEW ; do mv $OLD $NEW ; done")
+        for package in r.rpmPackages:
+            myrpmfilename = '%(builddir)s/../RPMS/'+package+'.rpm'
+            r.Create('conarymanifest')
+            r.RunForRPM('rpm -qp '+myrpmfilename+' --queryformat \'[%%%%attr(0%%{FILEMODES:octal},%%{FILEUSERNAME},%%{FILEGROUPNAME}) %%{FILENAMES}\n]\' >> conarymanifest', package=package)
+            r.Run('touch requires-'+package)
+            r.RunForRPM('rpm -qp '+myrpmfilename+' --queryformat \'[%%{REQUIRES}\n]\'|egrep -v \'[/(]\'|sed -e \'s/$/:runtime/\' -e \'s/^\\(.*-devel:\\)runtime$/\\1runtime\\n\\1devel/\'|sort -u > requires-'+package, package=package)
+            r.RunForRPM('rpm2cpio '+myrpmfilename+'|cpio -ivumd', dir='/', package=package)
+            r.MakeDirs('%(taghandlerdir)s')
+            r.MakeDirs('%(tagdescriptiondir)s')
+            r.RunForRPM('echo \''+'''#!/bin/bash
+
+if [ $# -lt 2 ]; then
+    echo "not enough arguments: $0 $*" >&2
+    exit 1
+fi
+
+type="$1"
+shift
+action="$1"
+shift
+case $type in
+files)
+    case $action in'''+'\' > %(destdir)s/%(taghandlerdir)s/'+package, package=package)
+            # update - POSTIN
+            # preremove - PREUN
+            # remove - POSTUN
+            # preupdate - PREIN
+            r.RunForRPM('rpm -qp '+myrpmfilename+' --queryformat \'' \
+                 '        update)\n        %%{POSTIN}\\n        %%{POSTINPROG}\\n        ;;\\n' \
+                 '        preremove)\n        %%{PREUN}\\n        %%{PREUNPROG}\\n        ;;\\n' \
+                 '        remove)\n        %%{POSTUN}\\n        %%{POSTUNPROG}\\n        ;;\\n' \
+                 '        preupdate)\n        %%{PREIN}\\n        %%{PREINPROG}\\n        ;;\\n' \
+                 '\'|grep -v \'^        (none)$\' >> %(destdir)s/%(taghandlerdir)s/'+package, package=package)
+            r.RunForRPM('echo \''+'''    esac
+;;
+esac'''+'\' >> %(destdir)s/%(taghandlerdir)s/'+package, package=package)
+            r.RunForRPM('echo \'file		%(taghandlerdir)s/'+package+'''
+datasource	stdin
+implements	files update
+implements	files remove
+implements	files preupdate
+implements	files preremove
+include		.*\' > %(destdir)s/%(tagdescriptiondir)s/'''+package, package=package)
+            r.SetModes('%(destdir)s/%(taghandlerdir)s/'+package,0755)
+
+        r.postmakeinstall()
+        r.ParseManifest('conarymanifest')
+        for package in r.rpmPackages: r.ParseRequires(file='requires-'+package, package=package)
+        r.postpolicy()
+
+class FactorySRPM(Factory):
+    name = 'factory-srpm'
+    version = '0'
+    def getRecipeClass(self):
+        if 'HOME' in os.environ: del os.environ['HOME']
+        os.environ['HOME'] = os.path.expanduser('~')
+        recipe = self.openSourceFile('%s.py' % self.packageName).read()
+        exec recipe in globals()
+        for line in recipe.split('\n'):
+            m = RE_CLASS.match(line)
+            if m: cls = m.group(1)
+        recipeClass = eval(cls)
+        rpmroot = tempfile.mkdtemp()
+        rpmurl, rpmfilename = recipeClass.geturlinfo()
+        cfg = conary.conarycfg.ConaryConfiguration(True)
+        repCache = conary.build.lookaside.RepositoryCache(None, cfg)
+        ff = conary.build.lookaside.FileFinder(recipeName=recipeClass.rpmName, repositoryCache=repCache, cfg=cfg)
+        url = conary.build.lookaside.laUrl(rpmurl)
+        try:
+            ff.searchLocalCache(url)
+            ff.searchNetworkSources(url, headers={})
+        except conary.build.lookaside.PathFound,pathInfo:
+            rpmfilename = '%s/%s' % (pathInfo.path, rpmfilename)
+
+        try: os.remove(os.path.expanduser('~/.rpmmacros'))
+        except: pass
+        p = subprocess.Popen(['/bin/rpm', '-i', rpmfilename])
+        p.wait()
+        rpmPackage = recipeClass.name
+        if rpmPackage in recipeClass.rpmPackagesMap: rpmPackage = recipeClass.rpmPackagesMap[rpmPackage]
+        if rpmPackage: recipeClass.rpmPackages.append(rpmPackage)
+        with open('%s/rpmbuild/SPECS/%s.spec' % (os.path.expanduser('~'), recipeClass.name)) as f:
+             for line in f:
+                 m = re.match('%package[ 	]*(-n[ 	]+)?(.*)[\r\n]*', line)
+                 if m:
+                      if m.group(1): rpmPackage = m.group(2)
+                      else: rpmPackage = "%s-%s" % (recipeClass.name, m.group(2))
+                      if rpmPackage in recipeClass.rpmPackagesMap: rpmPackage = recipeClass.rpmPackagesMap[rpmPackage]
+                      if rpmPackage: recipeClass.rpmPackages.append(rpmPackage)
+        print 'rpmPackages',recipeClass.rpmPackages
+        os.remove(rpmfilename)
+        p = subprocess.Popen(['/bin/rpm', '--initdb', '--root', rpmroot])
+        p.wait()
+        p = subprocess.Popen(['/usr/bin/rpmbuild', '--root', rpmroot, '-bp', 'rpmbuild/SPECS/%s.spec' % recipeClass.name] , cwd=os.path.expanduser('~'), stderr=subprocess.PIPE)
+        lines = p.communicate()[1].split('\n')
+        deps = False
+        for line in lines:
+            if line == 'error: Failed build dependencies:': deps = True
+            if deps and " is needed by " in line:
+                line = line[1:].split(' ')[0]
+                if line in recipeClass.buildRequiresMap:
+                    buildRequire = recipeClass.buildRequiresMap[line]
+                    if not buildRequire: continue
+                else:
+                    if line.endswith('-devel'):
+                        recipeClass.buildRequires.append(line+':runtime') # bleh
+                        buildRequire = line+':devel'
+                    elif line.endswith('-libs'):
+                        recipeClass.buildRequires.append(line+':runtime') # bleh
+                        buildRequire = line+':lib'
+                    else: buildRequire = line+':runtime'
+                recipeClass.buildRequires.append(buildRequire)
+        shutil.rmtree(rpmroot)
+        return recipeClass
