@@ -83,6 +83,6 @@ Summary: policy
 policy
 
 %files policy
-/usr/lib/
+/usr/lib/*
 
 %changelog
