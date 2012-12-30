@@ -33,7 +33,7 @@ def get_database(primary):
 
         os.remove(repomdfilename)
 
-#get_database(primary)
+get_database(primary)
 
 for arg in sys.argv[1:]:
     for primary_db_filename in primary.iterkeys():
@@ -49,6 +49,7 @@ for arg in sys.argv[1:]:
             else: release = "'%s' + rpmDist" % m.group(1)
             subprocess.check_call("cvc newpkg --context condora.mrns.nl --factory=srpm %s=condora.mrns.nl@f:rawhide" % arg, shell=True)
 #            subprocess.check_call("cvc co --context condora.mrns.nl %s=condora.mrns.nl@f:16" % arg, shell=True)
+            clsname = row[0].replace('-', '')
             with open("%(name)s/%(name)s.py" % {'name':arg}, 'w') as f:
                 f.write('''class %(clsname)s(SRPMPackageRecipe):
     name = '%(name)s'
@@ -56,7 +57,7 @@ for arg in sys.argv[1:]:
     rpmDist = '%(rpmDist)s'
     rpmRelease = %(release)s
 ''' % {
-                'clsname':row[0][0].upper()+row[0][1:],
+                'clsname':clsname[0].upper()+clsname[1:],
                 'name':row[0],
                 'version': row[1],
                 'rpmDist': m.group(2),
