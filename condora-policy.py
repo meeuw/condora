@@ -32,6 +32,8 @@ class RpmRequires(_RpmPolicy):
     bucket = policy.PACKAGE_CREATION
     processUnmodified = False
     requires = (
+        ('ComponentSpec', policy.REQUIRED_PRIOR),
+        ('PackageSpec', policy.REQUIRED_PRIOR),
         ('Requires', policy.REQUIRED_SUBSEQUENT),
     )
     def doProcess(self, recipe):
@@ -41,8 +43,11 @@ class RpmRequires(_RpmPolicy):
                 req = requires_split[1]
                 if '/' in req: continue #FIXME req = 'file: '+req
                 elif '(' in req: continue #FIXME req = 'soname: '+req
-                else: req = req+':runtime'
-                recipe.Requires(req, requires_split[0]+':runtime')
+                else: req+=':runtime'
+                reqs = requires_split[0]
+                if reqs.endswith('-devel'): reqs+=':devel'
+                else: reqs+=':runtime'
+                recipe.Requires(req, reqs)
 
 class RpmFiles(_RpmPolicy):
     bucket = policy.PACKAGE_CREATION
@@ -50,6 +55,7 @@ class RpmFiles(_RpmPolicy):
     requires = (
         ('Ownership', policy.REQUIRED),
         ('setModes', policy.REQUIRED),
+        ('ComponentSpec', policy.REQUIRED_SUBSEQUENT),
         ('PackageSpec', policy.REQUIRED_SUBSEQUENT),
     )
     def doProcess(self, recipe):
@@ -79,9 +85,9 @@ class RpmScripts(_RpmPolicy):
             if not name in m: m[name] = {'NAME':name,'VERSION':version,'RELEASE':release}
             if not 'SCRIPTS' in m[name]: m[name]['SCRIPTS'] = ''
             if ret:
-                for rpm, conary in rpm2conary.itervalues:
+                for rpm, conary in rpm2conary.iteritems():
                     if querytag.startswith(rpm): break
-                conaryactions += conary
+                conaryactions.append(conary)
                 m[name]['SCRIPTS'] += '''%s)
 %s
 ;;''' % (conary, '\n'.join(ret))
@@ -115,6 +121,6 @@ esac
                 with file(tagdescriptionfn,'w') as f:
                     f.write('file\t%s/%s\ndatasource\tstdin\n' % (recipe.macros.taghandlerdir, name))
                     for conaryaction in conaryactions:
-                        f.write('implements\tfiles\n'+conaryaction)
+                        f.write('implements\tfiles %s\n'%conaryaction)
                     f.write('include\t%s/%s' % (recipe.macros.taghandlerdir, name))
                 recipe.PackageSpec(name, tagdescriptionfn)
