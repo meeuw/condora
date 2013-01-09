@@ -1,5 +1,7 @@
 import os
+import shutil
 import glob
+import re
 
 from conary.build import policy
 from conary.deps import deps
@@ -36,6 +38,12 @@ class RpmRequires(_RpmPolicy):
         ('PackageSpec', policy.REQUIRED_PRIOR),
         ('Requires', policy.REQUIRED_SUBSEQUENT),
     )
+    def __init__(self, *args, **keywords):
+        self.requiresMap = {}
+        _RpmPolicy.__init__(self, *args, **keywords)
+    def updateArgs(self, *args, **keywords):
+	if 'requiresMap' in keywords: self.requiresMap = keywords.pop('requiresMap')
+        _RpmPolicy.updateArgs(self, **keywords)
     def doProcess(self, recipe):
         for requires in self.doRpm(recipe, '[%{NAME},%{REQUIRES}\\n]'):
             requires_split = requires.split(',')
@@ -45,9 +53,13 @@ class RpmRequires(_RpmPolicy):
                 elif '(' in req: continue #FIXME req = 'soname: '+req
                 else: req+=':runtime'
                 reqs = requires_split[0]
-                if reqs.endswith('-devel'): reqs+=':devel'
+                if reqs in self.requiresMap: reqs=self.requiresMap[reqs]
+                elif reqs.endswith('-devel'): reqs+=':devel'
+                elif reqs.endswith('-python'): reqs+=':python'
+                elif reqs.endswith('-libs-static'): reqs+=':devellib'
+                elif reqs.endswith('-doc'): reqs+=':supdoc'
                 else: reqs+=':runtime'
-                recipe.Requires(req, reqs)
+                if reqs: recipe.Requires(req, reqs)
 
 class RpmFiles(_RpmPolicy):
     bucket = policy.PACKAGE_CREATION
@@ -59,13 +71,21 @@ class RpmFiles(_RpmPolicy):
         ('PackageSpec', policy.REQUIRED_SUBSEQUENT),
     )
     def doProcess(self, recipe):
-        for files in self.doRpm(recipe, '[%{NAME},0%{FILEMODES:octal},%{FILEUSERNAME},%{FILEGROUPNAME},%{FILENAMES}\\n]'):
+        empty = True
+        for files in self.doRpm(recipe, '[%{NAME},%{FILEMODES:octal},%{FILEUSERNAME},%{FILEGROUPNAME},%{FILENAMES}\\n]'):
             files_split = files.split(',')
+            for i in range(len(files_split)-1, 0, -1):
+                if files_split[i] == '(none)': del files_split[i]
             if len(files_split) >= 5:
+                empty = False
                 name, perms, owner, group, target = files_split
                 recipe.setModes(int(perms, 0), util.literalRegex(target))
                 if owner != 'root' or group != 'root': recipe.Ownership(owner, group, util.literalRegex(target))
+                target = re.escape(target)
                 recipe.PackageSpec(name, target)
+        if empty:
+            os.makedirs('%(destdir)s/etc/condora/'%self.recipe.macros)
+            with open('%(destdir)s/etc/condora/%(name)s'%self.recipe.macros,'w') as f: f.write('')
 
 class RpmScripts(_RpmPolicy):
     bucket = policy.PACKAGE_CREATION
@@ -124,3 +144,21 @@ esac
                         f.write('implements\tfiles %s\n'%conaryaction)
                     f.write('include\t%s/%s' % (recipe.macros.taghandlerdir, name))
                 recipe.PackageSpec(name, tagdescriptionfn)
+
+class RpmUnhardlinkManPages(policy.DestdirPolicy):
+    processUnmodified = False
+    requires = (
+        ('NormalizeManPages', policy.REQUIRED_SUBSEQUENT),
+    )
+    def doProcess(self, recipe):
+        return
+        inodes = {}
+        for dirpath, dirnames, filenames in os.walk('%(destdir)s/%(mandir)s'%recipe.macros):
+            for filename in filenames:
+                filename = '%s/%s'%(dirpath,filename)
+                inode = os.stat(filename).st_ino
+                if inode in inodes:
+                     os.remove(filename)
+                     print 'os.symlink', (inodes[inode][len(recipe.macros.destdir)+1:], filename)
+                     os.symlink(inodes[inode][len(recipe.macros.destdir)+1:], filename)
+                else: inodes[inode] = filename
