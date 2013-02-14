@@ -7,18 +7,21 @@ from conary.build import policy
 from conary.deps import deps
 from conary.lib import util
 
-class _RpmPolicy(policy.PackagePolicy):
+#class _RpmPolicy(policy.PackagePolicy):
+class _RpmPolicy(policy.DestdirPolicy):
     def __init__(self, *args, **keywords):
 	self.includes = []
 	self.excludes = []
-	policy.PackagePolicy.__init__(self, *args, **keywords)
+	#policy.PackagePolicy.__init__(self, *args, **keywords)
+	policy.DestdirPolicy.__init__(self, *args, **keywords)
 
     def updateArgs(self, *args, **keywords):
 	if 'includes' in keywords: self.includes.append(keywords.pop('includes'))
 	if 'excludes' in keywords: self.excludes.append(keywords.pop('excludes'))
-	policy.PackagePolicy.updateArgs(self, **keywords)
+	#policy.PackagePolicy.updateArgs(self, **keywords)
+	policy.DestdirPolicy.updateArgs(self, **keywords)
     def doRpm(self, recipe, queryformat):
-        if not self.includes: return
+        if not self.includes: return []
         rpmFileNames = []
         for include in self.includes:
             rpmFileNames += glob.glob(include%recipe.macros)
@@ -56,29 +59,34 @@ class RpmRequires(_RpmPolicy):
                 if reqs in self.requiresMap: reqs=self.requiresMap[reqs]
                 elif reqs.endswith('-devel'): reqs+=':devel'
                 elif reqs.endswith('-python'): reqs+=':python'
-                elif reqs.endswith('-libs-static'): reqs+=':devellib'
+                elif reqs.endswith('-static'): reqs+=':devellib'
                 elif reqs.endswith('-doc'): reqs+=':supdoc'
                 else: reqs+=':runtime'
-                if reqs: recipe.Requires(req, reqs)
+                if reqs:
+                    reqs = re.escape(reqs)
+                    print 'recipe.Requires', req, reqs
+                    recipe.Requires(req, reqs)
 
 class RpmFiles(_RpmPolicy):
-    bucket = policy.PACKAGE_CREATION
+    #bucket = policy.PACKAGE_CREATION
     processUnmodified = False
     requires = (
         ('Ownership', policy.REQUIRED),
         ('setModes', policy.REQUIRED),
+        ('NormalizeManPages', policy.REQUIRED_SUBSEQUENT), # replaces files
         ('ComponentSpec', policy.REQUIRED_SUBSEQUENT),
         ('PackageSpec', policy.REQUIRED_SUBSEQUENT),
     )
     def doProcess(self, recipe):
         empty = True
-        for files in self.doRpm(recipe, '[%{NAME},%{FILEMODES:octal},%{FILEUSERNAME},%{FILEGROUPNAME},%{FILENAMES}\\n]'):
+        for files in self.doRpm(recipe, '[%{NAME} %{FILEMODES:octal} %{FILEUSERNAME} %{FILEGROUPNAME} %{FILENAMES}\\n]'):
             files_split = files.split(',')
             for i in range(len(files_split)-1, 0, -1):
                 if files_split[i] == '(none)': del files_split[i]
             if len(files_split) >= 5:
                 empty = False
-                name, perms, owner, group, target = files_split
+                name, perms, owner, group = files_split[:4]
+                target = ' '.join(files_split[4:])
                 recipe.setModes(int(perms, 0), util.literalRegex(target))
                 if owner != 'root' or group != 'root': recipe.Ownership(owner, group, util.literalRegex(target))
                 target = re.escape(target)
@@ -100,6 +108,7 @@ class RpmScripts(_RpmPolicy):
         for querytag in ['POSTIN','POSTINPROG','PREUN','PREUNPROG','POSTUN','POSTUNPROG','PREIN','PREINPROG']:
             ret = self.doRpm(recipe, '%%{NAME}\n%%{VERSION}\n%%{RELEASE}\n%%{%s}' % querytag)
             if '(none)' in ret: ret.remove('(none)')
+            if len(ret) == 0: continue
             name, version, release = ret[:3]
             ret = ret[3:]
             if not name in m: m[name] = {'NAME':name,'VERSION':version,'RELEASE':release}
@@ -151,7 +160,6 @@ class RpmUnhardlinkManPages(policy.DestdirPolicy):
         ('NormalizeManPages', policy.REQUIRED_SUBSEQUENT),
     )
     def doProcess(self, recipe):
-        return
         inodes = {}
         for dirpath, dirnames, filenames in os.walk('%(destdir)s/%(mandir)s'%recipe.macros):
             for filename in filenames:
