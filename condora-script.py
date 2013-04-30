@@ -42,7 +42,7 @@ if options.sourcepackages:
         for sourcepackage in re.split('[ \t\n]+', f.read()):
             print sourcepackage
             if not sourcepackage: continue
-            c.execute('select name from packages where location_href like ?', ('%%/%s'%sourcepackage,))
+            c.execute('select name from packages where location_href like ?', ('%%/%s%%'%sourcepackage,))
             packages.append(c.fetchone()[0])
 
 def get_database(primary):
@@ -61,6 +61,9 @@ def get_database(primary):
 
 if options.get_database: get_database(primary)
 
+conary_repository = 'crh.mrns.nl'
+label = conary_repository + '@f:rh'
+
 for arg in packages:
     for primary_db_filename in primary.iterkeys():
         if 'x86_64' in primary_db_filename: continue
@@ -75,7 +78,7 @@ for arg in packages:
             release = "'%s' + rpmDist" % m.group(1)
             rpmDist = m.group(2)
             if not rpmDist: rpmDist = ''
-            if not os.path.exists(arg): subprocess.check_call("cvc newpkg --context=condora.mrns.nl --factory=srpm %s=condora.mrns.nl@f:rawhide" % arg, shell=True)
+            if not os.path.exists(arg): subprocess.check_call("cvc newpkg --context=%s --factory=srpm %s=%s" % (conary_repository, arg, label), shell=True)
             clsname = row[0].replace('-', '')
             with open("%(name)s/%(name)s.py" % {'name':arg}, 'w') as f:
                 recipe = '''class %(clsname)s(SRPMPackageRecipe):

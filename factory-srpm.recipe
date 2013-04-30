@@ -74,19 +74,23 @@ class SRPMPackageRecipe(PackageRecipe):
         r.addAction('sed -ie "s@^[	 ]*\\(%%prep\\)@\\1\\nexec \\&> %(builddir)s/rpmbuild-pipe@" %(builddir)s/SPECS/%(rpmName)s.spec')
         r.addAction('sed -ie "s@^[	 ]*\\(%%build\\)@\\1\\nexec \\&> %(builddir)s/rpmbuild-pipe@" %(builddir)s/SPECS/%(rpmName)s.spec')
         r.addAction('sed -ie "s@^[	 ]*\\(%%install\\)@\\1\\nexec \\&> %(builddir)s/rpmbuild-pipe@" %(builddir)s/SPECS/%(rpmName)s.spec')
+        r.addAction('sed -ie "/%%{__rm} -Rf \$RPM_BUILD_ROOT$/d" %(builddir)s/SPECS/%(rpmName)s.spec') # nspr
+        r.addAction('sed -ie "/%%{__rm} -rf \$RPM_BUILD_ROOT$/d" %(builddir)s/SPECS/%(rpmName)s.spec') # nss-softokn
+        r.addAction('sed -ie "/%%{__rm} -rf %%{buildroot}$/d" %(builddir)s/SPECS/%(rpmName)s.spec') # yum-metadata-parser
         r.addAction('sed -ie "/rm -rf \"\$RPM_BUILD_ROOT\"$/d" %(builddir)s/SPECS/%(rpmName)s.spec') # libtasn1
         r.addAction('sed -ie "/rm -rf \$RPM_BUILD_ROOT$/d" %(builddir)s/SPECS/%(rpmName)s.spec') # autoconf
         r.addAction('sed -ie "/rm -fr \$RPM_BUILD_ROOT$/d" %(builddir)s/SPECS/%(rpmName)s.spec') # libgcrypt
         r.addAction('sed -ie "/rm -rf \${RPM_BUILD_ROOT}$/d" %(builddir)s/SPECS/%(rpmName)s.spec') # automake
+        r.addAction('sed -ie "/rm -fr %%{buildroot}$/d" %(builddir)s/SPECS/%(rpmName)s.spec') # libxml2
         r.addAction('sed -ie "/rm -rf %%{buildroot}$/d" %(builddir)s/SPECS/%(rpmName)s.spec') # libassuan
         r.addAction('sed -ie "/mkdir %%{buildroot}$/d" %(builddir)s/SPECS/%(rpmName)s.spec') # filesystem
         r.postprep()
-        r.addAction('rpmbuild --buildpolicy=python-bytecompile --buildpolicy=compress --buildroot=%(destdir)s --noclean --nocheck --nodeps --root %(builddir)s/rpmdb -ba %(builddir)s/SPECS/%(rpmName)s.spec & echo $! > %(builddir)s/rpmbuild.pid')
-        r.addAction('cat %(builddir)s/rpmbuild-pipe')
+        r.addAction('rpmbuild --define \'%%__spec_install_pre %%{___build_pre}\' --buildroot=%(destdir)s --noclean --nocheck --nodeps --root %(builddir)s/rpmdb -ba %(builddir)s/SPECS/%(rpmName)s.spec & echo $! > %(builddir)s/rpmbuild.pid')
+        r.addAction('egrep \'^[	 ]*%%prep\' %(builddir)s/SPECS/%(rpmName)s.spec && cat %(builddir)s/rpmbuild-pipe ; :')
         r.postunpack()
-        r.Run('cat %(builddir)s/../rpmbuild-pipe')
+        r.Run('egrep \'^[	 ]*%%build\' %(builddir)s/../SPECS/%(rpmName)s.spec && cat %(builddir)s/../rpmbuild-pipe ; :')
         r.postmake()
-        r.Run('cat %(builddir)s/../rpmbuild-pipe')
+        r.Run('egrep \'^[	 ]*%%install\' %(builddir)s/../SPECS/%(rpmName)s.spec && cat %(builddir)s/../rpmbuild-pipe ; :')
         r.Run('while kill -0 $(< %(builddir)s/../rpmbuild.pid) ; do sleep .1 ; done')
         r.postmakeinstall()
         r.RpmRequires(includes='%(builddir)s/../RPMS/*/*.rpm')
