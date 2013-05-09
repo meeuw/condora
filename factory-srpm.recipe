@@ -96,6 +96,7 @@ class SRPMPackageRecipe(PackageRecipe):
         r.RpmRequires(includes='%(builddir)s/../RPMS/*/*.rpm')
         r.RpmFiles(includes='%(builddir)s/../RPMS/*/*.rpm')
         r.RpmScripts(includes='%(builddir)s/../RPMS/*/*.rpm')
+        r.PackageSpec('%(name)s-rpmartefact', '.*')
         r.postpolicy()
 
 class FactorySRPM(Factory):

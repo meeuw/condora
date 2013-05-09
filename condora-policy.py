@@ -77,7 +77,7 @@ class RpmFiles(_RpmPolicy):
     def doProcess(self, recipe):
         empty = True
         for files in self.doRpm(recipe, '[%{NAME} %{FILEMODES:octal} %{FILEUSERNAME} %{FILEGROUPNAME} %{FILENAMES}\\n]'):
-            files_split = files.split(',')
+            files_split = files.split(' ')
             for i in range(len(files_split)-1, 0, -1):
                 if files_split[i] == '(none)': del files_split[i]
             if len(files_split) >= 5:
@@ -87,6 +87,7 @@ class RpmFiles(_RpmPolicy):
                 recipe.setModes(int(perms, 0), util.literalRegex(target))
                 if owner != 'root' or group != 'root': recipe.Ownership(owner, group, util.literalRegex(target))
                 target = re.escape(target)
+                print 'PackageSpec', name, target
                 recipe.PackageSpec(name, target)
         if empty:
             os.makedirs('%(destdir)s/etc/condora/'%self.recipe.macros)
@@ -129,8 +130,8 @@ EOFcondora
 ;;
 ''' % (case, script[0], script[1])
 
-            taghandlerfn = ('%(destdir)s/%(taghandlerdir)s/' % recipe.macros) + name
-            with file(taghandlerfn,'w') as f: f.write('''#!/bin/bash
+            taghandlerfn = '/'.join((recipe.macros.taghandlerdir, name))
+            with file(recipe.macros.destdir+taghandlerfn,'w') as f: f.write('''#!/usr/bin/bash
 # %(EPOCH)s:%(NAME)s-%(VERSION)s.%(RELEASE)s
 if [ $# -lt 2 ]; then
     echo "not enough arguments: $0 $*" >&2
@@ -149,15 +150,15 @@ case $type in
     ;;
 esac
 ''' % {'NAME':value[0][0], 'VERSION':value[0][1], 'RELEASE':value[0][2], 'EPOCH':value[0][3], 'SCRIPTS':scripts})
-            os.chmod(taghandlerfn, 0755)
-            recipe.PackageSpec(name, taghandlerfn)
-            tagdescriptionfn = ('%(destdir)s/%(tagdescriptiondir)s/' % recipe.macros) + name
-            with file(tagdescriptionfn,'w') as f:
+            os.chmod(recipe.macros.destdir+taghandlerfn, 0755)
+            recipe.PackageSpec(name, re.escape(taghandlerfn))
+            tagdescriptionfn = '/'.join((recipe.macros.tagdescriptiondir, name))
+            with file(recipe.macros.destdir+tagdescriptionfn,'w') as f:
                 f.write('file\t%s/%s\ndatasource\tstdin\n' % (recipe.macros.taghandlerdir, name))
                 for conaryaction in conaryactions:
                     f.write('implements\tfiles %s\n'%conaryaction)
-                f.write('include\t%s/%s' % (recipe.macros.taghandlerdir, name))
-            recipe.PackageSpec(name, tagdescriptionfn)
+                f.write('include\t%s/%s' % (recipe.macros.taghandlerdir, re.escape(name)))
+            recipe.PackageSpec(name, re.escape(tagdescriptionfn))
 
 class RpmUnhardlinkManPages(policy.DestdirPolicy):
     processUnmodified = False
