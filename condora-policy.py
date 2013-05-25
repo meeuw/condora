@@ -190,3 +190,22 @@ class RpmUnhardlinkManPages(policy.DestdirPolicy):
                      print 'os.symlink', (inodes[inode][len(recipe.macros.destdir)+1:], filename)
                      os.symlink(inodes[inode][len(recipe.macros.destdir)+1:], filename)
                 else: inodes[inode] = filename
+
+class RpmPackageSpecArtefact(policy.DestdirPolicy):
+    bucket = policy.PACKAGE_CREATION
+    processUnmodified = False
+    requires = (
+        ('PackageSpec', policy.REQUIRED_SUBSEQUENT),
+        ('RpmScripts', policy.REQUIRED_PRIOR),
+        ('RpmFiles', policy.REQUIRED_PRIOR),
+    )
+    def __init__(self, *args, **keywords):
+        self.catchall = ''
+        policy.DestdirPolicy.__init__(self, *args, **keywords)
+
+    def updateArgs(self, *args, **keywords):
+        if 'catchall' in keywords: self.catchall = keywords.pop('catchall')
+        policy.DestdirPolicy.updateArgs(self, **keywords)
+    def doProcess(self, recipe):
+        if self.catchall: recipe.PackageSpec(self.catchall, '.*')
+

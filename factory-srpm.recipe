@@ -69,6 +69,7 @@ class SRPMPackageRecipe(PackageRecipe):
     def setup(r):
         rpmurl, rpmfilename = r.geturlinfo()
         r.addAction('echo %%_unpackaged_files_terminate_build 0 > ~/.rpmmacros')
+        r.addAction('echo %%buildroot %(destdir)s >> ~/.rpmmacros')
         r.addAction('echo %%_builddir %(builddir)s >> ~/.rpmmacros')
         r.addAction('echo %%_specdir %(builddir)s/SPECS >> ~/.rpmmacros')
         r.addAction('echo %%_rpmdir %(builddir)s/RPMS >> ~/.rpmmacros')
@@ -110,7 +111,7 @@ class SRPMPackageRecipe(PackageRecipe):
         r.RpmRequires(includes='%(builddir)s/../RPMS/*/*.rpm')
         r.RpmFiles(includes='%(builddir)s/../RPMS/*/*.rpm')
         r.RpmScripts(includes='%(builddir)s/../RPMS/*/*.rpm')
-        r.PackageSpec('%(name)s-rpmartefact', '.*')
+        r.RpmPackageSpecArtefact(catchall='%(name)s-rpmartefact')
         r.postpolicy()
 
 class FactorySRPM(Factory):
