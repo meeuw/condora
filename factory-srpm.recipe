@@ -20,6 +20,7 @@ import os
 import os.path
 import conary.conarycfg
 import conary.build.lookaside
+import conary.build.errors
 import time
 RE_CLASS = re.compile(
     r'''^class\s+(\S+)\(''')
@@ -29,19 +30,18 @@ class SRPMPackageRecipe(PackageRecipe):
     rpmName = ''
     rpmUpVer = ''
     rpmDist = ''
-    buildRequires = [ 'rpm', 'rpm-build', 'conary-policy-condora',
+    buildRequires = [ 'rpm', 'rpm-build',
         # minumum build environment Fedora:
         'bash:runtime', 'bzip2:runtime', 'coreutils:runtime', 'cpio:runtime',
         'diffutils:runtime', 'findutils:runtime', 'gawk:runtime',
         'gcc:runtime', 'gcc:devel', 'gcc-c++:runtime', 'grep:runtime',
-        'gzip:runtime', 'info:runtime', 'make:runtime', 'patch:runtime',
+        'gzip:runtime', 'texinfo:runtime', 'make:runtime', 'patch:runtime',
         'sed:runtime', 'shadow-utils:runtime', 'tar:runtime', 'unzip:runtime',
         'util-linux:runtime', 'which:runtime', 'xz:runtime',
         'glibc-devel:runtime', 'glibc-devel:devel', 'glibc-headers:runtime',
-        'glibc-headers:devel', 'file:runtime', 'doxygen:runtime',
-        'libstdc++-devel:runtime', 'libstdc++-devel:devel',
-        'kernel-headers:runtime', 'kernel-headers:devel','pkgconfig:runtime',
-        'pkgconfig:devel', 'autoconf:runtime' ]
+        'glibc-headers:devel', 'file:runtime', # 'doxygen:runtime',
+        'libstdc++-devel:devel', 'kernel-headers:devel','pkgconfig:devel',
+        'autoconf:runtime' ]
 
     @classmethod
     def geturlinfo(cls):
@@ -155,11 +155,11 @@ class FactorySRPM(Factory):
                     buildRequire = recipeClass.buildRequiresMap[line]
                     if not buildRequire: continue
                 else:
+                    if '/' in line:
+                        raise conary.build.errors.RecipeFileError("Build requirement '%s' cannot have have a slash its name" % (line))
                     if line.endswith('-devel'):
-                        recipeClass.buildRequires.append(line+':runtime') # bleh
                         buildRequire = line+':devel'
                     elif line.endswith('-libs'):
-                        recipeClass.buildRequires.append(line+':runtime') # bleh
                         buildRequire = line+':lib'
                     else: buildRequire = line+':runtime'
                 recipeClass.buildRequires.append(buildRequire)

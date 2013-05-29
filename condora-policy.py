@@ -74,7 +74,6 @@ class RpmRequires(_RpmPolicy):
                 elif reqs.endswith('-doc'): reqs+=':supdoc'
                 else: reqs+=':runtime'
                 if reqs:
-                    reqs = re.escape(reqs)
                     print 'recipe.Requires', req, reqs
                     recipe.Requires(req, reqs)
 

@@ -122,7 +122,10 @@ for arg in packages:
                     elif line.startswith('error: Build requirement'):
                         conn2 = sqlite3.connect('/home/meeuw/condora/rawhide-x86_64-primary.sqlite3')
                         c = conn2.cursor()
-                        fail = line.split("'")[1][:-8]
+                        if '/' in line:
+                            fail = line.split("'")[1]
+                        else:
+                            fail = line.split("'")[1][:-8]
                         c.execute('select packages.name from packages inner join provides on packages.pkgKey = provides.pkgKey where provides.name = ?', (fail,))
                         buildRequiresMap[fail] = str(c.fetchone()[0])
                         with open('%(name)s/%(name)s.py' % {'name':arg}, 'w') as f:
